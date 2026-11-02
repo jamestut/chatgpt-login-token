@@ -24,6 +24,7 @@ HEADER_COMMAND = [
 EXCLUDED_MODELS = {"gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"}
 CACHE_TTL_SECONDS = 3600
 REQUEST_TIMEOUT_SECONDS = 60
+CONTEXT_WINDOW_SIZE = 272000
 
 MODELS_URL = "https://chatgpt.com/backend-api/codex/models"
 REMOVED_MODEL_KEYS = {
@@ -72,6 +73,7 @@ def fetch_models() -> bytes:
         for key in REMOVED_MODEL_KEYS:
             model.pop(key, None)
         model["prefer_websockets"] = False
+        model["context_window"] = CONTEXT_WINDOW_SIZE
         filtered_models.append(model)
 
     catalog["models"] = filtered_models
