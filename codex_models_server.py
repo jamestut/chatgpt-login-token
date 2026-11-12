@@ -74,6 +74,13 @@ def fetch_models() -> bytes:
             model.pop(key, None)
         model["prefer_websockets"] = False
         model["context_window"] = CONTEXT_WINDOW_SIZE
+        # Identify the selected model in its instructions before caching the catalog.
+        messages = model["model_messages"]
+        messages["instructions_template"] = (
+            f'<model_id>{model["slug"]}</model_id>\n'
+            f'<model_name>{model["display_name"]}</model_name>\n'
+            + messages["instructions_template"]
+        )
         filtered_models.append(model)
 
     catalog["models"] = filtered_models
