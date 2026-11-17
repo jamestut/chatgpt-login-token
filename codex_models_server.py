@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Serve a filtered, cached Codex model catalog at /models.json."""
+"""Serve filtered and raw Codex model catalogs."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 
-CLIENT_VERSION = "0.162.0"
+CLIENT_VERSION = "0.169.1"
 HEADER_COMMAND = [
     sys.executable,
     str(Path(__file__).resolve().with_name("codex_chatgpt.py")),
@@ -39,7 +39,7 @@ _cached_body: bytes | None = None
 _fetched_at = 0.0
 
 
-def fetch_models() -> bytes:
+def fetch_raw_models() -> bytes:
     result = subprocess.run(
         HEADER_COMMAND,
         capture_output=True,
@@ -59,7 +59,11 @@ def fetch_models() -> bytes:
         headers={**headers, "Accept": "application/json"},
     )
     with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
-        catalog = json.load(response)
+        return response.read()
+
+
+def fetch_models() -> bytes:
+    catalog = json.loads(fetch_raw_models())
 
     if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), list):
         raise ValueError("The model catalog must contain a models array.")
@@ -98,14 +102,21 @@ def models_body() -> bytes:
     return body
 
 
+MODEL_ROUTES = {
+    "/models.json": models_body,
+    "/rawmodels.json": fetch_raw_models,
+}
+
+
 class ModelsHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if urlsplit(self.path).path != "/models.json":
+        fetch_body = MODEL_ROUTES.get(urlsplit(self.path).path)
+        if fetch_body is None:
             self.send_error(404)
             return
 
         try:
-            body = models_body()
+            body = fetch_body()
         except (OSError, subprocess.SubprocessError, ValueError, TypeError, HTTPException):
             self.send_json(502, b'{"error":"Could not retrieve the model catalog."}')
             return
@@ -133,6 +144,7 @@ def main() -> None:
 
     with HTTPServer((args.bind, args.port), ModelsHandler) as server:
         print(f"Serving http://{args.bind}:{server.server_port}/models.json", flush=True)
+        print(f"Serving http://{args.bind}:{server.server_port}/rawmodels.json", flush=True)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
