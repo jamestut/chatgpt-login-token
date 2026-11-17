@@ -21,7 +21,7 @@ HEADER_COMMAND = [
     str(Path(__file__).resolve().with_name("codex_chatgpt.py")),
     "token",
 ]
-EXCLUDED_MODELS = {"gpt-5.6-terra", "gpt-5.6-sol", "gpt-6-astra"}
+ALLOWED_MODELS = {"gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"}
 CACHE_TTL_SECONDS = 3600
 REQUEST_TIMEOUT_SECONDS = 60
 CONTEXT_WINDOW_SIZE = 272000
@@ -37,9 +37,30 @@ REMOVED_MODEL_KEYS = {
 
 _cached_body: bytes | None = None
 _fetched_at = 0.0
+_settings_path: Path | None = None
 
 
-def fetch_raw_models() -> bytes:
+def load_settings() -> tuple[set[str], str]:
+    if _settings_path is None:
+        return ALLOWED_MODELS, CLIENT_VERSION
+
+    settings = json.loads(_settings_path.read_text(encoding="utf-8"))
+    if not isinstance(settings, dict):
+        raise ValueError("Model catalog settings must be a JSON object.")
+    allowed_models = settings.get("allowed_models", list(ALLOWED_MODELS))
+    client_version = settings.get("client_version", CLIENT_VERSION)
+    if not isinstance(allowed_models, list) or not all(
+        isinstance(model, str) for model in allowed_models
+    ):
+        raise ValueError("allowed_models must be an array of strings.")
+    if not isinstance(client_version, str):
+        raise ValueError("client_version must be a string.")
+    return set(allowed_models), client_version
+
+
+def fetch_raw_models(client_version: str | None = None) -> bytes:
+    if client_version is None:
+        _, client_version = load_settings()
     result = subprocess.run(
         HEADER_COMMAND,
         capture_output=True,
@@ -55,7 +76,7 @@ def fetch_raw_models() -> bytes:
         raise ValueError("The header command must return a JSON object of strings.")
 
     request = Request(
-        MODELS_URL + "?" + urlencode({"client_version": CLIENT_VERSION}),
+        MODELS_URL + "?" + urlencode({"client_version": client_version}),
         headers={**headers, "Accept": "application/json"},
     )
     with urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
@@ -63,7 +84,9 @@ def fetch_raw_models() -> bytes:
 
 
 def fetch_models() -> bytes:
-    catalog = json.loads(fetch_raw_models())
+    # Use one settings snapshot for the upstream request and its filtering.
+    allowed_models, client_version = load_settings()
+    catalog = json.loads(fetch_raw_models(client_version))
 
     if not isinstance(catalog, dict) or not isinstance(catalog.get("models"), list):
         raise ValueError("The model catalog must contain a models array.")
@@ -72,7 +95,7 @@ def fetch_models() -> bytes:
     for model in catalog["models"]:
         if not isinstance(model, dict):
             raise ValueError("Each model must be a JSON object.")
-        if model.get("visibility") == "hide" or model.get("slug") in EXCLUDED_MODELS:
+        if model.get("visibility") == "hide" or model.get("slug") not in allowed_models:
             continue
         for key in REMOVED_MODEL_KEYS:
             model.pop(key, None)
@@ -133,14 +156,19 @@ class ModelsHandler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
+    global _settings_path
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--bind", default="127.0.0.1", help="bind address (default: 127.0.0.1)"
+        "-b", "--bind", default="127.0.0.1", help="bind address (default: 127.0.0.1)"
     )
     parser.add_argument(
-        "--port", type=int, default=8080, help="listen port (default: 8080)"
+        "-p", "--port", type=int, default=8080, help="listen port (default: 8080)"
+    )
+    parser.add_argument(
+        "-s", "--model-catalog-settings", type=Path, help="path to model catalog settings JSON"
     )
     args = parser.parse_args()
+    _settings_path = args.model_catalog_settings
 
     with HTTPServer((args.bind, args.port), ModelsHandler) as server:
         print(f"Serving http://{args.bind}:{server.server_port}/models.json", flush=True)
