@@ -78,7 +78,7 @@ def fetch_models() -> bytes:
         messages = model["model_messages"]
         messages["instructions_template"] = (
             f'<model_id>{model["slug"]}</model_id>\n'
-            f'<model_name>{model["display_name"]}</model_name>\n'
+            f'<model_name>{model["display_name"]}</model_name>\n\n\n'
             + messages["instructions_template"]
         )
         filtered_models.append(model)
