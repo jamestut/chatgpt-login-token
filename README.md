@@ -1,4 +1,4 @@
-# chatgpt-login-token
+# Codex ChatGPT CLI
 
 A small Python CLI that uses Codex-managed ChatGPT authentication to print auth headers for the ChatGPT Codex Responses endpoint or the current account quota.
 
@@ -125,3 +125,43 @@ The quota endpoint is live data, so `usage` starts app-server and makes a networ
 - If no file credential store exists, set `cli_auth_credentials_store = "file"` in `$CODEX_HOME/config.toml`, then complete sign-in with `codex login`.
 - If refresh fails, check that the Codex login is still valid and that network access is available. A revoked or expired refresh token may require signing in again.
 - If the Codex app-server protocol changes, update this CLI to match the Codex runtime installed on the machine.
+
+# Codex model catalog server
+
+The model catalog server fetches the Codex model catalog using your ChatGPT credentials and serves it over HTTP. Run it from this repository:
+
+```sh
+python codex_models_server.py
+```
+
+The server listens on `127.0.0.1:8080` by default. It provides two endpoints:
+
+- `http://127.0.0.1:8080/models.json` returns allowed models that are not marked hidden. The server caches this catalog for one hour.
+- `http://127.0.0.1:8080/rawmodels.json` returns the upstream catalog without filtering or caching.
+
+The filtered catalog also removes availability and service-tier fields, sets `prefer_websockets` to `false` and the context window to 272,000, and adds the model ID and name to its instructions.
+
+## Settings
+
+To override the default settings, create a JSON file such as `model-catalog.json`. This example shows the defaults:
+
+```json
+{
+  "allowed_models": ["gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"],
+  "client_version": "0.169.1"
+}
+```
+
+Pass the file with `-s` or `--model-catalog-settings`:
+
+```sh
+python codex_models_server.py -s model-catalog.json
+```
+
+Each omitted field uses its default. An empty `allowed_models` array allows no models. The server reads the file on each upstream fetch, so edits reach the filtered endpoint after its cache expires and the raw endpoint on its next request. Requests fail if the file is unreadable or invalid.
+
+Use `-b` or `--bind` to change the bind address, and `-p` or `--port` to change the port:
+
+```sh
+python codex_models_server.py -b 127.0.0.1 -p 8080
+```
